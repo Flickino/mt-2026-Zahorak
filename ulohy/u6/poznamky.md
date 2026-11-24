@@ -13,15 +13,33 @@
 - **režim pomalej siete**: každá položka dostane vlastné náhodné oneskorenie 0–3000 ms, takže niektoré
   karty dobehnú skôr a iné neskôr. Dovtedy je na ich mieste **skeleton**.
 
+## Etapa 3 – kategórie a svetlý/tmavý režim
+
+Vlastná funkcionalita navyše:
+
+- **nové API volanie**: `GET /products/categories` (24 kategórií) a filtrovanie zoznamu cez
+  `GET /products/category/{slug}` – nekonečné posúvanie aj pomalá sieť fungujú aj vo filtri,
+  `total` sa berie z odpovede danej kategórie
+- **lišta kategórií má vlastné stavy**, nezávislé od zoznamu: sivé zástupné čipy počas načítania,
+  kompaktná hláška s *Znova* pri chybe (zoznam medzitým funguje ďalej bez filtra)
+- **prázdny stav**: kategória bez produktov vráti `200` a prázdne pole – nie je to chyba, preto má
+  vlastnú obrazovku („V tejto kategórii nie sú žiadne produkty.")
+- **svetlý / tmavý režim**: prepínač v `AppBar` cyklí *podľa systému → svetlý → tmavý*.
+  Celé UI stavia na `ColorScheme` (`surfaceContainerHighest`, `errorContainer`, `outline`),
+  takže skeletony, odznaky zliav aj chybové stavy fungujú v oboch témach bez zvláštneho ošetrenia.
+
 ## Rozdelenie kódu
 
 | Súbor | Zodpovednosť |
 |---|---|
 | `lib/api/dummyjson_api.dart` | **jediná trieda, ktorá komunikuje so serverom** – URL, HTTP, stavový kód, JSON → model / `ApiException` |
 | `lib/model/product.dart` | model `Product`, `ProductPage` (`total/skip/limit`), `ProductIdPage` |
+| `lib/model/category.dart` | model `Category` (`slug` do URL, `name` pre používateľa) |
 | `lib/model/product_slot.dart` | jedno miesto v zozname + jeho vlastný stav (dáta / načítava sa / chyba) |
 | `lib/ui/products_screen.dart` | stav obrazovky, nekonečné posúvanie, generácia požiadaviek |
 | `lib/ui/product_tile.dart` | karta položky v troch stavoch: dáta / skeleton / chyba |
+| `lib/ui/category_bar.dart` | lišta kategórií s vlastnými stavmi |
+| `lib/main.dart` | svetlá a tmavá téma + `ThemeMode` |
 
 UI nevie nič o HTTP ani o JSON – dostane hotový model alebo chybovú hlášku.
 
@@ -37,6 +55,10 @@ Odpoveď `/products` má na vrchu `products`, `total` (194), `skip`, `limit`.
 | `brand` | String **alebo chýba** | **chýba pri 92 z 194 produktov** (napr. celá kategória `groceries`) → v modeli `String?`, v UI „Bez značky" |
 | `price` | číslo (int aj double) | preto sa parsuje cez `num` |
 | `discountPercentage` | číslo | v dátach 0.04 – 19.61 |
+
+Kategórie z `/products/categories` **nie sú reťazce, ale objekty** `{slug, name, url}` – a je to
+jediná odpoveď v celom API, ktorá má na vrchu pole, nie objekt. Preto má API trieda zvlášť
+`_getMap` a `_getList`.
 
 Ďalšie polia (`description`, `rating`, `stock`, `tags`, `dimensions`, `reviews`, `meta`, `images`, …)
 zoznam nepotrebuje, preto sa sťahujú len vybrané polia cez `?select=`.
@@ -99,6 +121,24 @@ V ostrej aplikácii by toto menu nebolo.
 | `screenshot-4-pomala-siet.jpg` | pomalá sieť – niektoré karty hotové, iné ešte skeletony |
 | `screenshot-5-doplnanie-davky.jpg` | pätička *Načítavam ďalšie…* počas dopĺňania |
 | `screenshot-6-koniec-zoznamu.jpg` | *Koniec zoznamu – 194 z 194 produktov* |
+| `screenshot-7-kategoria-tmava.jpg` | filter na kategóriu *Beauty* (5 z 5), tmavý režim |
+| `screenshot-8-kategorie-svetla.jpg` | lišta kategórií, svetlý režim |
+| `screenshot-9-chyba-kategorii.jpg` | vlastná chyba lišty kategórií + chyba zoznamu |
+
+## Čo by sa dalo zlepšiť
+
+Vedomé obmedzenia, nie prehliadnuté chyby:
+
+- **Lišta kategórií ukazuje naraz ~3 z 25.** Scrolluje sa vodorovne, ale nič to nenaznačuje, takže
+  vzdialenejšie kategórie sa hľadajú naslepo. Riešenie by bolo ikona ku každej kategórii plus spodný
+  panel s mriežkou všetkých 24; odložené na neskôr.
+- **Počty produktov v kategóriách nie sú zobrazené.** `total` je známy iba pre práve načítanú
+  kategóriu – čísla pri všetkých by znamenali 24 požiadaviek navyše.
+- **Chybový stav jednej karty** (`_ErrorTile`) a **prázdna kategória** sú ošetrené, ale cez UI sa
+  k nim nedá dostať – každá z 24 kategórií má produkty a detail položky zlyhá len pri reálnom
+  výpadku siete. Ide o obrannú vetvu, nie o odskúšaný stav.
+- **`Image.network`** je jediné sieťové volanie mimo API triedy. Je to načítanie obrázka widgetom
+  Flutteru, nie volanie API – dáta chodia výhradne cez `DummyJsonApi`.
 
 ## Spustenie
 

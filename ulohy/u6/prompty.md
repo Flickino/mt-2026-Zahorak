@@ -51,3 +51,39 @@
 - rozhodnutie, že oneskorenie má byť **skutočná sieťová latencia**, nie `Future.delayed` v appke,
 - že zoznam idčiek ide naplno, aby boli skeletony na obrazovke hneď,
 - overenie na telefóne cez lokálnu sieť (potiahnutie prstom, dopĺňanie dávok).
+
+## Etapa 3
+
+**Prompt**
+
+„pridať vlastnú funkcionalitu – aspoň jeden nový api use, vlastné stavy, zas screeny,
+ja osobne by som pridal pekné kategórie a pridaj dark/light režim."
+
+**Čo robil model**
+
+- overenie endpointov kategórií cez `curl` – zistil, že `/products/categories` vracia **objekty**
+  `{slug, name, url}` (nie reťazce) a ako jediné je na vrchu pole, nie objekt,
+  a že **neexistujúca kategória vráti 200 s prázdnym zoznamom**, nie chybu,
+- `Category` model, `_getMap` / `_getList` v API triede, filtrovanie cez `/products/category/{slug}`,
+- lišta kategórií s vlastnými stavmi (zástupné čipy / chyba so *Znova* / čipy),
+- svetlá a tmavá téma + prepínač *podľa systému → svetlý → tmavý*,
+- odskúšanie v prehliadači a screenshoty: filter *Beauty* (5 z 5), svetlý režim, chyba kategórií.
+
+**Čo som riešil sám / upravil**
+
+- že prázdna kategória je **prázdny stav, nie chyba**,
+- že chyba kategórií nesmie zhodiť zoznam produktov – ten beží ďalej bez filtra,
+- overenie, že vynútená svetlá téma prebije tmavý systém (prvý snímok vyzeral ako chyba,
+  v skutočnosti to bol zachytený medzisnímok prechodu).
+
+## Kontrola výsledku
+
+Po etape 2 prebehla **recenzia kódu viacerými agentmi** (súbežnosť, stránkovanie, Flutter,
+splnenie zadania) s následným adversariálnym overovaním každého nálezu. Z 12 tvrdení prežilo
+overenie jedno – a bolo opodstatnené: obnova potiahnutím v režime pomalej siete vracala karty
+do skeletonu, čím rušila požiadavku z etapy 1 („počas obnovy zostanú staré dáta"). Opravené
+a overené. Ostatné tvrdenia (zamrznuté prednačítanie, navždy pulzujúce karty) pri overení padli.
+
+Po etape 3 som si nechal zhodnotiť aj vzhľad lišty kategórií. Záver: funguje, ale ukazuje naraz
+len ~3 z 25 kategórií. Prepracovanie (ikony + panel s mriežkou) je **vedome odložené**, dôvody
+a návrh riešenia sú v `poznamky.md` v časti *Čo by sa dalo zlepšiť*.

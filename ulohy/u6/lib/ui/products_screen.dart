@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../api/dummyjson_api.dart';
+import '../model/category.dart';
 import '../model/product_slot.dart';
+import 'category_bar.dart';
 import 'product_tile.dart';
 
 /// Výsledok jednej dávky – položky a koľko ich je celkovo na serveri.
@@ -17,7 +19,14 @@ class _PageResult {
 /// Stará sa len o stav obrazovky (načítavam / chyba / dáta / dopĺňam ďalšie) –
 /// samotné sťahovanie rieši [DummyJsonApi], dáta držia [ProductSlot].
 class ProductsScreen extends StatefulWidget {
-  const ProductsScreen({super.key});
+  final ThemeMode themeMode;
+  final VoidCallback onToggleTheme;
+
+  const ProductsScreen({
+    super.key,
+    required this.themeMode,
+    required this.onToggleTheme,
+  });
 
   @override
   State<ProductsScreen> createState() => _ProductsScreenState();
@@ -55,19 +64,35 @@ class _ProductsScreenState extends State<ProductsScreen> {
   /// Chyba dopĺňania (iba pätička zoznamu).
   String? _moreError;
 
+  /// Kategórie majú vlastný stav – nezávislý od zoznamu produktov.
+  List<Category> _categories = [];
+  bool _loadingCategories = false;
+  String? _categoriesError;
+
+  /// Vybraná kategória; `null` = všetky produkty.
+  String? _selectedSlug;
+
   /// Číslo generácie požiadaviek.
   ///
-  /// Zvýši sa pri obnove a pri zmene režimu. Odpovede so starým číslom sa
-  /// zahodia – inak by pomalá odpoveď dobehla až po obnove a prepísala
-  /// čerstvé dáta alebo nasypala duplicity.
+  /// Zvýši sa pri obnove, pri zmene režimu a pri zmene kategórie. Odpovede so
+  /// starým číslom sa zahodia – inak by pomalá odpoveď dobehla až po zmene
+  /// a prepísala čerstvé dáta alebo nasypala cudzie položky.
   int _generation = 0;
 
   bool get _hasMore => _hasData && _slots.length < _total;
+
+  Category? get _selectedCategory {
+    for (final category in _categories) {
+      if (category.slug == _selectedSlug) return category;
+    }
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _loadCategories();
     _loadFirstPage();
   }
 
@@ -86,6 +111,37 @@ class _ProductsScreenState extends State<ProductsScreen> {
     if (position.pixels >= position.maxScrollExtent - _prefetchPx) {
       _loadNextPage();
     }
+  }
+
+  // ------------------------------------------------------------- kategórie
+
+  Future<void> _loadCategories() async {
+    setState(() {
+      _loadingCategories = true;
+      _categoriesError = null;
+    });
+
+    try {
+      final categories = await _api.fetchCategories();
+      if (!mounted) return;
+      setState(() {
+        _categories = categories;
+        _loadingCategories = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCategories = false;
+        _categoriesError = _messageFor(e);
+      });
+    }
+  }
+
+  void _selectCategory(String? slug) {
+    if (slug == _selectedSlug) return;
+    setState(() => _selectedSlug = slug);
+    // nová kategória = nový zoznam od nuly
+    _loadFirstPage();
   }
 
   // ------------------------------------------------------------- načítanie
@@ -174,14 +230,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
     }
   }
 
-  /// Načítanie jednej dávky podľa režimu.
+  /// Načítanie jednej dávky podľa režimu a vybranej kategórie.
   ///
   /// Bežne príde celá dávka jednou požiadavkou. V režime pomalej siete prídu
   /// najprv iba identifikátory (skeletony sú na obrazovke hneď) a dáta každej
   /// položky sa doťahujú zvlášť – preto niektoré karty dobiehajú dlhšie.
   Future<_PageResult> _fetchPage({required int skip}) async {
     if (_api.isSlowNetwork) {
-      final page = await _api.fetchProductIds(limit: _pageSize, skip: skip);
+      final page = await _api.fetchProductIds(
+        limit: _pageSize,
+        skip: skip,
+        categorySlug: _selectedSlug,
+      );
 
       // Dáta, ktoré už na obrazovke sú. Pri obnove sa karta nesmie vrátiť
       // do skeletonu len preto, že sa obnovuje – ostane stará hodnota,
@@ -202,7 +262,11 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
     }
 
-    final page = await _api.fetchProducts(limit: _pageSize, skip: skip);
+    final page = await _api.fetchProducts(
+      limit: _pageSize,
+      skip: skip,
+      categorySlug: _selectedSlug,
+    );
     return _PageResult(
       slots: page.products.map(ProductSlot.loaded).toList(),
       total: page.total,
@@ -269,10 +333,21 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final category = _selectedCategory;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Produkty'),
+        title: Text(category?.name ?? 'Produkty'),
         actions: [
+          IconButton(
+            tooltip: 'Svetlý / tmavý režim',
+            icon: Icon(switch (widget.themeMode) {
+              ThemeMode.system => Icons.brightness_auto,
+              ThemeMode.light => Icons.light_mode,
+              ThemeMode.dark => Icons.dark_mode,
+            }),
+            onPressed: widget.onToggleTheme,
+          ),
           // Len na odskúšanie stavov, v ostrej aplikácii by tu nebolo.
           PopupMenuButton<ApiTestMode>(
             icon: const Icon(Icons.bug_report_outlined),
@@ -307,9 +382,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
               )
             : null,
       ),
-      body: RefreshIndicator(
-        onRefresh: () => _loadFirstPage(isRefresh: true),
-        child: _buildBody(),
+      body: Column(
+        children: [
+          CategoryBar(
+            categories: _categories,
+            loading: _loadingCategories,
+            error: _categoriesError,
+            selectedSlug: _selectedSlug,
+            onSelect: _selectCategory,
+            onRetry: _loadCategories,
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: () => _loadFirstPage(isRefresh: true),
+              child: _buildBody(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -362,11 +452,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
     }
 
+    // 3. kategória bez produktov – API vráti 200 a prázdny zoznam,
+    //    nie je to chyba, ale prázdny stav
     if (_slots.isEmpty) {
-      return const _CenteredScrollable(child: Text('Žiadne produkty.'));
+      return _CenteredScrollable(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.inventory_2_outlined,
+                size: 56,
+                color: Theme.of(context).colorScheme.outline,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                _selectedSlug == null
+                    ? 'Žiadne produkty.'
+                    : 'V tejto kategórii nie sú žiadne produkty.',
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
-    // 3. dáta – posledný prvok je pätička so stavom dopĺňania
+    // 4. dáta – posledný prvok je pätička so stavom dopĺňania
     return ListView.builder(
       controller: _scroll,
       // aby sa dalo potiahnuť aj keď je zoznam kratší ako obrazovka

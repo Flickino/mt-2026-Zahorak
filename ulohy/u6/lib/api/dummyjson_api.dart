@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
+import '../model/category.dart';
 import '../model/product.dart';
 
 /// Chyba, ktorej text sa dá rovno ukázať používateľovi.
@@ -57,12 +58,29 @@ class DummyJsonApi {
 
   bool get isSlowNetwork => testMode == ApiTestMode.slowNetwork;
 
-  /// Zoznam produktov aj s dátami – `GET /products?limit=&skip=`.
+  /// Zoznam kategórií – `GET /products/categories`.
   ///
-  /// Používa sa v bežnom režime: jedna požiadavka = celá dávka 20 položiek.
-  Future<ProductPage> fetchProducts({int limit = 20, int skip = 0}) async {
-    final json = await _getJson(
-      path: '/products',
+  /// Jediná odpoveď v celom API, ktorá je na vrchu **pole**, nie objekt.
+  Future<List<Category>> fetchCategories() async {
+    final list = await _getList(path: '/products/categories');
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map(Category.fromJson)
+        .where((category) => category.slug.isNotEmpty)
+        .toList();
+  }
+
+  /// Zoznam produktov aj s dátami.
+  ///
+  /// Bez kategórie `GET /products`, s kategóriou `GET /products/category/{slug}`.
+  /// Používa sa v bežnom režime: jedna požiadavka = celá dávka.
+  Future<ProductPage> fetchProducts({
+    int limit = 20,
+    int skip = 0,
+    String? categorySlug,
+  }) async {
+    final json = await _getMap(
+      path: _listPath(categorySlug),
       query: {
         'limit': '$limit',
         'skip': '$skip',
@@ -72,14 +90,18 @@ class DummyJsonApi {
     return ProductPage.fromJson(json);
   }
 
-  /// Iba identifikátory dávky – `GET /products?select=id`.
+  /// Iba identifikátory dávky (`?select=id`).
   ///
   /// Používa sa v režime pomalej siete: najprv sa zistí, *čo* v dávke je
   /// (aby sa dali hneď vykresliť skeletony), a dáta každej položky sa
   /// doťahujú zvlášť cez [fetchProduct].
-  Future<ProductIdPage> fetchProductIds({int limit = 20, int skip = 0}) async {
-    final json = await _getJson(
-      path: '/products',
+  Future<ProductIdPage> fetchProductIds({
+    int limit = 20,
+    int skip = 0,
+    String? categorySlug,
+  }) async {
+    final json = await _getMap(
+      path: _listPath(categorySlug),
       query: {
         'limit': '$limit',
         'skip': '$skip',
@@ -94,7 +116,7 @@ class DummyJsonApi {
   /// V režime pomalej siete dostane požiadavka náhodné `?delay=0–3000`,
   /// takže oneskorenie je **skutočná sieťová latencia**, nie čakanie v appke.
   Future<Product> fetchProduct(int id) async {
-    final json = await _getJson(
+    final json = await _getMap(
       path: '/products/$id',
       query: {'select': _fields},
       randomDelay: isSlowNetwork,
@@ -102,8 +124,38 @@ class DummyJsonApi {
     return Product.fromJson(json);
   }
 
+  String _listPath(String? categorySlug) => categorySlug == null
+      ? '/products'
+      : '/products/category/$categorySlug';
+
+  // ------------------------------------------------------------- vnútro
+
+  Future<Map<String, dynamic>> _getMap({
+    required String path,
+    Map<String, String> query = const {},
+    bool randomDelay = false,
+  }) async {
+    final decoded =
+        await _get(path: path, query: query, randomDelay: randomDelay);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiException('Server poslal neplatnú odpoveď.');
+    }
+    return decoded;
+  }
+
+  Future<List<dynamic>> _getList({
+    required String path,
+    Map<String, String> query = const {},
+  }) async {
+    final decoded = await _get(path: path, query: query);
+    if (decoded is! List<dynamic>) {
+      throw const ApiException('Server poslal neplatnú odpoveď.');
+    }
+    return decoded;
+  }
+
   /// Spoločná časť pre všetky požiadavky: zostavenie URL, HTTP, stavový kód, JSON.
-  Future<Map<String, dynamic>> _getJson({
+  Future<dynamic> _get({
     required String path,
     Map<String, String> query = const {},
     bool randomDelay = false,
@@ -118,8 +170,7 @@ class DummyJsonApi {
         if (testMode == ApiTestMode.slow) 'delay': '2000',
         // Oneskoruje sa len požiadavka na jednu položku. Zoznam idčiek
         // ide naplno, aby boli skeletony na obrazovke hneď.
-        if (randomDelay)
-          'delay': '${_random.nextInt(maxRandomDelayMs + 1)}',
+        if (randomDelay) 'delay': '${_random.nextInt(maxRandomDelayMs + 1)}',
       });
     }
 
@@ -141,7 +192,7 @@ class DummyJsonApi {
     }
 
     try {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      return jsonDecode(response.body);
     } on FormatException {
       throw const ApiException('Server poslal neplatnú odpoveď.');
     }
