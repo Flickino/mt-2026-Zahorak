@@ -71,3 +71,33 @@ class ProductPage {
     );
   }
 }
+
+/// Dávka, z ktorej potrebujeme iba identifikátory (`?select=id`).
+///
+/// V režime pomalej siete sa najprv zistí, čo v dávke je, a dáta každej
+/// položky sa doťahujú zvlášť.
+class ProductIdPage {
+  final List<int> ids;
+  final int total;
+  final int skip;
+  final int limit;
+
+  const ProductIdPage({
+    required this.ids,
+    required this.total,
+    required this.skip,
+    required this.limit,
+  });
+
+  factory ProductIdPage.fromJson(Map<String, dynamic> json) {
+    final list = json['products'] as List<dynamic>? ?? const [];
+    return ProductIdPage(
+      ids: list
+          .map((e) => (e as Map<String, dynamic>)['id'] as int)
+          .toList(),
+      total: json['total'] as int? ?? 0,
+      skip: json['skip'] as int? ?? 0,
+      limit: json['limit'] as int? ?? 0,
+    );
+  }
+}

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
@@ -15,13 +16,17 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
-/// Režim na odskúšanie stavov UI (zadanie si pýta dôkaz aj o chybovom stave).
+/// Režim na odskúšanie stavov UI.
 enum ApiTestMode {
   /// Normálna požiadavka.
   normal,
 
-  /// `?delay=2000` – odpoveď oneskorená o 2 s, aby bolo vidieť načítavanie.
+  /// `?delay=2000` – celá odpoveď oneskorená o 2 s (etapa 1).
   slow,
+
+  /// Pomalá sieť: **každá položka** sa ťahá zvlášť a dostane náhodné
+  /// oneskorenie 0–3000 ms, takže niektoré karty dobiehajú dlhšie ako iné.
+  slowNetwork,
 
   /// `/http/503` – server vráti chybu.
   error,
@@ -34,7 +39,15 @@ enum ApiTestMode {
 class DummyJsonApi {
   static const String _host = 'dummyjson.com';
 
+  /// Polia, ktoré zoznam naozaj zobrazuje.
+  static const String _fields =
+      'title,brand,price,discountPercentage,thumbnail';
+
+  /// Horná hranica náhodného oneskorenia v režime pomalej siete.
+  static const int maxRandomDelayMs = 3000;
+
   final http.Client _client;
+  final Random _random = Random();
 
   /// Prepína sa z UI (ikona chrobáka), v ostrej aplikácii by tu nebol.
   ApiTestMode testMode;
@@ -42,24 +55,58 @@ class DummyJsonApi {
   DummyJsonApi({http.Client? client, this.testMode = ApiTestMode.normal})
       : _client = client ?? http.Client();
 
-  /// Zoznam produktov – `GET /products?limit=&skip=`.
+  bool get isSlowNetwork => testMode == ApiTestMode.slowNetwork;
+
+  /// Zoznam produktov aj s dátami – `GET /products?limit=&skip=`.
+  ///
+  /// Používa sa v bežnom režime: jedna požiadavka = celá dávka 20 položiek.
   Future<ProductPage> fetchProducts({int limit = 20, int skip = 0}) async {
     final json = await _getJson(
       path: '/products',
       query: {
         'limit': '$limit',
         'skip': '$skip',
-        // zoznam potrebuje len tieto polia, nie celý produkt s reviews
-        'select': 'title,brand,price,discountPercentage,thumbnail',
+        'select': _fields,
       },
     );
     return ProductPage.fromJson(json);
+  }
+
+  /// Iba identifikátory dávky – `GET /products?select=id`.
+  ///
+  /// Používa sa v režime pomalej siete: najprv sa zistí, *čo* v dávke je
+  /// (aby sa dali hneď vykresliť skeletony), a dáta každej položky sa
+  /// doťahujú zvlášť cez [fetchProduct].
+  Future<ProductIdPage> fetchProductIds({int limit = 20, int skip = 0}) async {
+    final json = await _getJson(
+      path: '/products',
+      query: {
+        'limit': '$limit',
+        'skip': '$skip',
+        'select': 'id',
+      },
+    );
+    return ProductIdPage.fromJson(json);
+  }
+
+  /// Jeden produkt – `GET /products/{id}`.
+  ///
+  /// V režime pomalej siete dostane požiadavka náhodné `?delay=0–3000`,
+  /// takže oneskorenie je **skutočná sieťová latencia**, nie čakanie v appke.
+  Future<Product> fetchProduct(int id) async {
+    final json = await _getJson(
+      path: '/products/$id',
+      query: {'select': _fields},
+      randomDelay: isSlowNetwork,
+    );
+    return Product.fromJson(json);
   }
 
   /// Spoločná časť pre všetky požiadavky: zostavenie URL, HTTP, stavový kód, JSON.
   Future<Map<String, dynamic>> _getJson({
     required String path,
     Map<String, String> query = const {},
+    bool randomDelay = false,
   }) async {
     final Uri url;
     if (testMode == ApiTestMode.error) {
@@ -69,6 +116,10 @@ class DummyJsonApi {
       url = Uri.https(_host, path, {
         ...query,
         if (testMode == ApiTestMode.slow) 'delay': '2000',
+        // Oneskoruje sa len požiadavka na jednu položku. Zoznam idčiek
+        // ide naplno, aby boli skeletony na obrazovke hneď.
+        if (randomDelay)
+          'delay': '${_random.nextInt(maxRandomDelayMs + 1)}',
       });
     }
 

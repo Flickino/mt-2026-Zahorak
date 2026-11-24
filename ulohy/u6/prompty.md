@@ -25,3 +25,29 @@
 - prepínač testovacieho režimu v `AppBar` (normálne / `delay=2000` / `503`), aby sa stavy dali
   odskúšať a odfotiť bez zásahu do kódu,
 - overenie kódu cez `flutter analyze` (bez chýb).
+
+## Etapa 2
+
+**Prompty**
+
+1. „teraz budeme pridávať infinity scroll – keď prídeme na tú 20. položku, načítajú sa ďalšie
+   (youtube/ig logika), ale treba pridať aj slow network mode – random položky dostanú 0–3000 ms delay,
+   aby to simulovalo pomalý net. najprv mi spíš heslovito ako to chápeš."
+2. Upresnenie: „chceme znázorniť, že niektoré položky sa načítavajú dlhšie ako iné" → z toho vzišlo
+   riešenie s doťahovaním každej položky zvlášť cez `/products/{id}?delay=…`, nie s jedným
+   oneskorením na celú dávku.
+
+**Čo robil model**
+
+- overenie API cez `curl` (`/products/{id}?select=`, `?select=id`, `?delay=` na detaile),
+- rozdelenie na dve cesty načítania (dávka naraz vs. idčká + položky zvlášť),
+- `ProductSlot` so stavom na položku, skeleton karta, pätička zoznamu,
+- ochrana proti zastaraným odpovediam a dvojitým dávkam,
+- odskúšanie v prehliadači: prejdených všetkých 194 produktov po dávkach + screenshoty stavov,
+- recenzia kódu viacerými agentmi (súbežnosť, stránkovanie, Flutter, splnenie zadania).
+
+**Čo som riešil sám / upravil**
+
+- rozhodnutie, že oneskorenie má byť **skutočná sieťová latencia**, nie `Future.delayed` v appke,
+- že zoznam idčiek ide naplno, aby boli skeletony na obrazovke hneď,
+- overenie na telefóne cez lokálnu sieť (potiahnutie prstom, dopĺňanie dávok).
